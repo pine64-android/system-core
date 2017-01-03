@@ -100,6 +100,7 @@ LOCAL_SRC_FILES := $(commonSources) \
         ashmem-dev.c \
         debugger.c \
         klog.c \
+        misc_rw.c \
         partition_utils.c \
         properties.c \
         qtaguid.c \

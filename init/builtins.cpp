@@ -49,6 +49,9 @@
 #include "log.h"
 
 #define chmod DO_NOT_USE_CHMOD_USE_FCHMODAT_SYMLINK_NOFOLLOW
+#define INSMOD_PATH                     ("/system/vendor/modules/")
+#define I2C_DEVICE_CONFIG_PATH          ("/sys/devices/sw_device/devlist")
+#define BUF_LENGTH  (1024)
 
 int add_environment(const char *name, const char *value);
 
@@ -165,6 +168,44 @@ int do_export(int nargs, char **args)
     return add_environment(args[1], args[2]);
 }
 
+int do_format_userdata(int nargs, char **args)
+{
+	ERROR("-----------rogge---------------do_format_userdata");
+    const char * devicePath = args[1];
+    char bootsector[512];
+    int fd;
+    pid_t child;
+    int status;
+
+    property_set("ro.udisk.label", args[2]);
+    fd = open(devicePath, O_RDONLY);
+    if (fd <= 0) {
+        ERROR("open device error: %s", strerror(errno));
+        return 1;
+    }
+    memset(bootsector, 0, 512);
+    read(fd, bootsector, 512);
+    close(fd);
+    if ((bootsector[510]==0x55) && (bootsector[511]==0xaa)) {
+        ERROR("dont need format %s", devicePath);
+        return 1;
+    } else {
+		ERROR("-----------rogge---------------start format");
+        INFO("start format %s", devicePath);
+        child = fork();
+        if (child == 0) {
+            INFO("fork to format %s", devicePath);
+            execl("/system/bin/newfs_msdos", "newfs_msdos",
+                    "-F", "32", "-O", "android", "-c", "8", "-L", args[2], args[1], NULL);
+            exit(-1);
+        }
+        INFO("wait for format %s", devicePath);
+        while (waitpid(-1, &status, 0) != child);
+        INFO("format %s ok", devicePath);
+        return 1;
+    }
+}
+
 int do_hostname(int nargs, char **args)
 {
     return write_file("/proc/sys/kernel/hostname", args[1]);
@@ -175,6 +216,138 @@ int do_ifup(int nargs, char **args)
     return __ifupdown(args[1], 1);
 }
 
+static int do_init_dev_detect_inner(int accessed_flag,char *options)
+{
+	FILE *fp;
+	int ret = -1;
+	char buf[BUF_LENGTH] = {0};
+	size_t buf_size = 0;
+
+	if(accessed_flag == 1){
+		while((fp = fopen("cache/sw_device/devlist.info","rb")) == NULL) {
+			ERROR("can't not open file devlist.info!\n");
+			sleep(1);
+		}
+	}else if(accessed_flag == 0 ){
+		while((fp = fopen(I2C_DEVICE_CONFIG_PATH,"rb")) == NULL) {
+			ERROR("can't not open file!\n");
+			sleep(1);
+		}
+
+		do{
+			memset(&buf,0,sizeof(buf));
+			buf_size = fread(buf,1,1024,fp);
+			INFO("[init_dev_detect]devlist buf : %s\n",buf);
+			if (strstr(buf , "ctp_name") == NULL){
+				sleep(1);
+				fseek(fp , 0 , SEEK_SET);
+			}else{
+				if(accessed_flag == 0){
+					fseek(fp , 0 , SEEK_SET);
+					mkdir("cache/sw_device", 0700);
+					int fd = open("cache/sw_device/devlist.info", O_RDWR|O_CREAT|O_TRUNC|O_CLOEXEC, 0600);
+					if (fd >= 0) {
+						INFO("[init_dev_detect]devlist write_buf : %s\n",buf);
+						write(fd, buf,( buf_size + 1));
+						close(fd);
+					} else {
+						ERROR("could not open cache/sw_device/devlist.info\n");
+						continue;
+					}
+				}
+				break;
+			}
+		}while(1);
+	}else{
+		ERROR("accessed_flag is a unexpectable value!\n");
+		return -1;
+	}
+
+	memset(&buf,0,sizeof(buf));
+	while(fgets(buf, 128 , fp)){
+		char module_name[128] = {'\0'};
+		char insmod_name[128];
+		char ko[] = ".ko";
+		char ch = '\"';
+		char * position1 ;
+		char * position2 ;
+		int s1 = 0,s2 = 0,k = 0;
+
+		memset(&insmod_name,0,sizeof(insmod_name));
+		memset(&module_name,0,sizeof(module_name));
+		position1 = strchr(buf,ch);
+		position2 = strrchr(buf,ch);
+		s1 = position1 - buf + 1;
+		s2 = position2 - buf;
+
+		while(s1 != s2)
+		{
+			module_name[k++] = buf[s1++];
+		}
+		module_name[k] = '\0';
+		INFO("module_name:%s\n",module_name);
+
+		sprintf(insmod_name,"%s%s%s",INSMOD_PATH,module_name,ko);
+		INFO("start to insmod %s\n",insmod_name);
+
+		ret = insmod(insmod_name, options);
+		memset(&buf,0,sizeof(buf));
+	}
+
+        fclose(fp);
+        return ret;
+
+}
+
+
+
+
+int do_init_dev_detect(int nargs, char **args)
+{
+	char options[1];
+	pid_t pid;
+	int ret = -1;
+	int child_ret = -1;
+	int status;
+	int accessed_flag = 0;
+
+	options[0] = '\0';
+
+	if ((access("cache/sw_device/devlist.info",F_OK) )== 0 ){
+		accessed_flag = 1;
+	}else{
+		insmod("/system/vendor/modules/sw-device.ko",options);
+		accessed_flag = 0;
+	}
+
+	pid = fork();
+	if (pid > 0) {
+		/* Parent.  Wait for the child to return */
+		int wp_ret = TEMP_FAILURE_RETRY(waitpid(pid, &status, 0));
+		if (wp_ret < 0) {
+			/* Unexpected error code. We will continue anyway. */
+			NOTICE("waitpid failed rc=%d: %s\n", wp_ret, strerror(errno));
+		}
+
+		if (WIFEXITED(status)) {
+			ret = WEXITSTATUS(status);
+		} else {
+			ret = -1;
+			}
+		} else if (pid == 0) {
+			/* child, call fs_mgr_mount_all() */
+			child_ret = do_init_dev_detect_inner(accessed_flag,options);
+			if (child_ret == -1) {
+				ERROR("do_init_dev_detect_inner()  returned an error\n");
+			}
+			_exit(child_ret);
+			} else {
+				/* fork failed, return an error */
+				return -1;
+			}
+
+	return 0;
+}
 
 static int do_insmod_inner(int nargs, char **args, int opt_len)
 {

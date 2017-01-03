@@ -140,6 +140,9 @@ static int lookup_keyword(const char *s)
         if (!strcmp(s, "xec")) return K_exec;
         if (!strcmp(s, "xport")) return K_export;
         break;
+    case 'f':
+        if (!strcmp(s, "ormat_userdata")) return K_format_userdata;
+        break;
     case 'g':
         if (!strcmp(s, "roup")) return K_group;
         break;
@@ -152,6 +155,7 @@ static int lookup_keyword(const char *s)
         if (!strcmp(s, "nsmod")) return K_insmod;
         if (!strcmp(s, "mport")) return K_import;
         if (!strcmp(s, "nstallkey")) return K_installkey;
+        if (!strcmp(s, "nit_dev_detect")) return K_init_dev_detect;
         break;
     case 'k':
         if (!strcmp(s, "eycodes")) return K_keycodes;

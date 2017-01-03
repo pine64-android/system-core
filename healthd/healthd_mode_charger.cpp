@@ -316,6 +316,21 @@ static void draw_battery(struct charger *charger)
     }
 }
 
+#define STR_LEN 64
+static void draw_capacity(struct charger *charger)
+{
+    char cap_str[STR_LEN];
+    int x, y;
+    int str_len_px;
+
+    snprintf(cap_str, (STR_LEN - 1), "%d%%", charger->batt_anim->capacity);
+    str_len_px = gr_measure(cap_str);
+    x = (gr_fb_width() - str_len_px) / 2;
+    y = (gr_fb_height() + char_height) / 2;
+    android_green();
+    gr_text(x, y, cap_str, 0);
+}
+
 static void redraw_screen(struct charger *charger)
 {
     struct animation *batt_anim = charger->batt_anim;
@@ -325,8 +340,10 @@ static void redraw_screen(struct charger *charger)
     /* try to display *something* */
     if (batt_anim->capacity < 0 || batt_anim->num_frames == 0)
         draw_unknown(charger);
-    else
+    else {
         draw_battery(charger);
+        draw_capacity(charger);
+    }
     gr_flip();
 }
 
@@ -509,11 +526,17 @@ static void set_next_key_check(struct charger *charger,
 static void process_key(struct charger *charger, int code, int64_t now)
 {
     struct key_state *key = &charger->keys[code];
+    int64_t reboot_timeout = key->timestamp + POWER_ON_KEY_TIME;
+    int64_t display_timeout = key->timestamp + (POWER_ON_KEY_TIME / 4);
 
     if (code == KEY_POWER) {
         if (key->down) {
-            int64_t reboot_timeout = key->timestamp + POWER_ON_KEY_TIME;
             if (now >= reboot_timeout) {
+                LOGW("[%" PRId64 "] stop animation and clear screen\n", now);
+                reset_animation(charger->batt_anim);
+                clear_screen();
+                gr_flip();
+                
                 /* We do not currently support booting from charger mode on
                    all devices. Check the property and continue booting or reboot
                    accordingly. */
@@ -529,22 +552,36 @@ static void process_key(struct charger *charger, int code, int64_t now)
                             "less than minimum\n", now);
                     }
                 }
+            } else if (now >= display_timeout) {
+                kick_animation(charger->batt_anim);
+                LOGW("[%" PRId64 "] batt_anim\n", now);
+                request_suspend(false);
+                set_next_key_check(charger, key, (POWER_ON_KEY_TIME * 3 / 4));
             } else {
                 /* if the key is pressed but timeout hasn't expired,
                  * make sure we wake up at the right-ish time to check
                  */
-                set_next_key_check(charger, key, POWER_ON_KEY_TIME);
+                set_next_key_check(charger, key, (POWER_ON_KEY_TIME / 4));
 
                /* Turn on the display and kick animation on power-key press
                 * rather than on key release
                 */
-                kick_animation(charger->batt_anim);
-                request_suspend(false);
+
             }
         } else {
             /* if the power key got released, force screen state cycle */
             if (key->pending) {
-                kick_animation(charger->batt_anim);
+                if (!charger->batt_anim->run) {
+                    kick_animation(charger->batt_anim);
+                    request_suspend(false);
+                } else {
+                    reset_animation(charger->batt_anim);
+                    charger->next_screen_transition = -1;
+                    clear_screen();
+                    gr_flip();
+                    if (charger->charger_connected)
+                    request_suspend(true);
+                }
             }
         }
     }

@@ -47,6 +47,7 @@
 
 #define VERITY_METADATA_SIZE 32768
 #define VERITY_TABLE_RSA_KEY "/verity_key"
+#define VERITY_BLOCK         "/dev/block/by-name/verity_block"
 #define VERITY_TABLE_HASH_IDX 8
 #define VERITY_TABLE_SALT_IDX 9
 
@@ -718,6 +719,8 @@ static int compare_last_signature(struct fstab_rec *fstab, int *match)
 
     *match = 1;
 
+	#if 0
+
     // get verity filesystem size
     if (get_fs_size(fstab->fs_type, fstab->blk_device, &device_size) < 0) {
         ERROR("Failed to get filesystem size\n");
@@ -728,6 +731,27 @@ static int compare_last_signature(struct fstab_rec *fstab, int *match)
         ERROR("Failed to read verity signature from %s\n", fstab->mount_point);
         goto out;
     }
+
+	#else
+
+	// get verity filesystem size
+    if (get_fs_size(fstab->fs_type, VERITY_BLOCK, &device_size) < 0) {
+        ERROR("Failed to get filesystem size\n");
+        goto out;
+    }
+
+    if (read_verity_metadata(device_size, VERITY_BLOCK, &signature, NULL) < 0) {
+        ERROR("Failed to read verity signature from %s\n", fstab->mount_point);
+        goto out;
+    }
+
+	// get system filesystem size
+    if (get_fs_size(fstab->fs_type, fstab->blk_device, &device_size) < 0) {
+        ERROR("Failed to get filesystem size\n");
+        goto out;
+    }
+	
+	#endif
 
     SHA256_hash(signature, RSANUMBYTES, curr);
 
@@ -997,6 +1021,8 @@ int fs_mgr_setup_verity(struct fstab_rec *fstab) {
     io->flags |= 1;
     io->target_count = 1;
 
+	#if 0
+	
     // get verity filesystem size
     if (get_fs_size(fstab->fs_type, fstab->blk_device, &device_size) < 0) {
         return retval;
@@ -1008,6 +1034,26 @@ int fs_mgr_setup_verity(struct fstab_rec *fstab) {
                                   fstab->blk_device,
                                   &verity_table_signature,
                                   &verity_table);
+	#else
+	
+    // get verity filesystem size
+    if (get_fs_size(fstab->fs_type, VERITY_BLOCK, &device_size) < 0) {
+        return retval;
+    }
+
+    // read the verity block at the end of the block device
+    // send error code up the chain so we can detect attempts to disable verity
+    retval = read_verity_metadata(device_size,
+                                  VERITY_BLOCK,
+                                  &verity_table_signature,
+                                  &verity_table);
+	// get system filesystem size
+    if (get_fs_size(fstab->fs_type, fstab->blk_device, &device_size) < 0) {
+        return retval;
+    }
+	
+	#endif
+	
     if (retval < 0) {
         goto out;
     }

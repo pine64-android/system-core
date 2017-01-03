@@ -26,6 +26,7 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <string.h>
+#include <fstream>
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -152,6 +153,7 @@ void fixup_sys_perms(const char *upath)
         if ((strlen(upath) + strlen(dp->attr) + 6) > sizeof(buf))
             break;
 
+	  usleep(10000);
         snprintf(buf, sizeof(buf), "/sys%s/%s", upath, dp->attr);
         INFO("fixup %s %d %d 0%o\n", buf, dp->uid, dp->gid, dp->perm);
         chown(buf, dp->uid, dp->gid);
@@ -462,6 +464,26 @@ err:
     return NULL;
 }
 
+static std::string find_partition_name(std::string cmdline, const char *devname) {
+    int begin, end;
+    begin = cmdline.find("partitions=") + strlen("partitions=");
+    end = cmdline.find(" ", begin);
+    if (end < 0) end = cmdline.length();
+    std::string partition_string = cmdline.substr(begin, end - begin);
+    int i, j, len = partition_string.length();
+    for (i = 0; i < len; i = j + 1) {
+        j = partition_string.find(":", i);
+        if (j < 0) j = len;
+        std::string tmp = partition_string.substr(i, j - i);
+        int k = tmp.find("@");
+        std::string name = tmp.substr(0, k);
+        std::string blk = tmp.substr(k + 1);
+        if (!strcmp(devname, blk.c_str()))
+            return name;
+    }
+    return "";
+}
+
 static char **get_block_device_symlinks(struct uevent *uevent)
 {
     const char *device;
@@ -473,6 +495,23 @@ static char **get_block_device_symlinks(struct uevent *uevent)
     int link_num = 0;
     char *p;
 
+    char **links = (char**) malloc(sizeof(char *) * 5);
+    if (!links)
+        return NULL;
+    memset(links, 0, sizeof(char *) * 5);
+
+    std::string cmdline;
+    std::ifstream cmdline_fin("/proc/cmdline");
+    if (getline(cmdline_fin, cmdline)) {
+        std::string partname = find_partition_name(cmdline, uevent->device_name);
+        if (partname.length() > 0) {
+            if (asprintf(&links[link_num], "/dev/block/by-name/%s", partname.c_str()) > 0)
+                link_num++;
+            else
+                links[link_num] = NULL;
+        }
+    }
+
     pdev = find_platform_device(uevent->path);
     if (pdev) {
         device = pdev->name;
@@ -481,13 +520,8 @@ static char **get_block_device_symlinks(struct uevent *uevent)
         device = buf;
         type = "pci";
     } else {
-        return NULL;
+        return links;
     }
-
-    char **links = (char**) malloc(sizeof(char *) * 4);
-    if (!links)
-        return NULL;
-    memset(links, 0, sizeof(char *) * 4);
 
     INFO("found %s device %s\n", type, device);
 

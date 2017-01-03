@@ -279,6 +279,11 @@ enum {
     NATIVE_WINDOW_BUFFER_AGE = 13,
 };
 
+enum
+{
+	NATIVE_WINDOW_CMD_GET_SURFACE_TEXTURE_TYPE = 0,
+};
+
 /* Valid operations for the (*perform)() hook.
  *
  * Values marked as 'deprecated' are supported, but have been superceded by
@@ -311,6 +316,8 @@ enum {
     NATIVE_WINDOW_SET_SIDEBAND_STREAM       = 18,
     NATIVE_WINDOW_SET_BUFFERS_DATASPACE     = 19,
     NATIVE_WINDOW_SET_SURFACE_DAMAGE        = 20,   /* private */
+    NATIVE_WINDOW_SETPARAMETER              = 50,
+    NATIVE_WINDOW_GETPARAMETER              = 51
 };
 
 /* parameter for NATIVE_WINDOW_[API_][DIS]CONNECT */

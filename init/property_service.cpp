@@ -358,6 +358,9 @@ void get_property_workspace(int *fd, int *sz)
 }
 
 static void load_properties_from_file(const char *, const char *);
+extern "C" {
+void property_opt_for_mem(void);
+}
 
 /*
  * Filter is used to decide which properties to load: NULL loads all keys,
@@ -565,6 +568,8 @@ void load_system_props() {
     load_properties_from_file(PROP_PATH_VENDOR_BUILD, NULL);
     load_properties_from_file(PROP_PATH_FACTORY, "ro.*");
     load_recovery_id_prop();
+
+    property_opt_for_mem();
 }
 
 void start_property_service() {
